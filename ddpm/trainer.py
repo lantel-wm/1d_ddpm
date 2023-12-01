@@ -7,7 +7,7 @@ import matplotlib.pyplot as plt
 
 # from .unet import Unet
 from .dataloader import get_dataloader
-from .diffusion import Diffusion
+# from .diffusion1d import Diffusion1d
 from .utils import default
 
 
@@ -16,7 +16,7 @@ class Trainer:
         self, 
         batch_size: int, 
         epochs: int, 
-        diffuser: Diffusion,
+        diffuser,
         sampler,
         device=None
         ) -> None:
@@ -58,7 +58,7 @@ class Trainer:
     def train(self):
         for epoch in range(self.epochs):
             loop = tqdm(self.dataloader, desc=f"Epoch {epoch}")
-            losses = []
+            # losses = []
             for data in loop:
                 self.optimizer.zero_grad()
                 
@@ -67,8 +67,8 @@ class Trainer:
                 loss = self.get_loss(data, t)
                 loss.backward()
                 self.optimizer.step()
-                losses.append(loss.item())
-                loop.set_postfix(loss=sum(losses) / len(losses))
+                # losses.append(loss.item())
+                loop.set_postfix(loss=loss.item())
                 
             self.save_model_weight(epoch)
             # self.save_sampled_image(epoch, torch.Size([1, 1, 960]))

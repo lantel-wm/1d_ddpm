@@ -21,7 +21,7 @@ class Lorenz05(Dataset):
             f.write(f"{self.data.min()}\n{self.data.max()}")
         if len(self.data.shape) == 3:
             self.data = self.data.reshape(-1, 960)
-        print(self.data.shape)
+        # print(self.data.shape)
         self.data = self.data - self.data.min()
         self.data = self.data / self.data.max()
         self.data = self.data * 2 - 1
