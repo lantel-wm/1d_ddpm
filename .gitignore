@@ -1,0 +1,11 @@
+*.png
+*.jpg
+*.npy
+
+*.pyc
+*.pt
+
+*.zip
+
+results*/
+stanford_cars/
