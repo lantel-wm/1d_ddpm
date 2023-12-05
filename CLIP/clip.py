@@ -2,7 +2,7 @@ import torch
 from torch import nn
 import torch.nn.functional as F
 
-from resnet import ResNet, BasicBlock
+from .resnet import ResNet, BasicBlock
 
 
 class ProjectionHead(nn.Module):
@@ -51,6 +51,9 @@ class CLIPModel(nn.Module):
         # Getting Image and Text Embeddings (with same dimension)
         image_embeddings = self.image_projection(image_features)
         text_embeddings = self.text_projection(text_features)
+        
+        # print(torch.sqrt(torch.sum(image_embeddings**2, dim=-1)))
+        # print(torch.sqrt(torch.sum(text_embeddings**2, dim=-1)))
 
         # Calculating the Loss
         logits = (text_embeddings @ image_embeddings.T) / self.temperature
@@ -73,3 +76,12 @@ def cross_entropy(preds, targets, reduction='none'):
         return loss
     elif reduction == "mean":
         return loss.mean()
+    
+    
+if __name__ == '__main__':
+    model = CLIPModel()
+    img = torch.randn(16, 1, 960)
+    txt = torch.randn(16, 1, 240)
+    # print(img, txt)
+    loss = model(img, txt)
+    print(loss)
