@@ -4,6 +4,7 @@ import numpy as np
 import torch
 from torch.utils.data import Dataset, DataLoader, random_split
 
+# for CLIP training
 class ImageTextPair(Dataset):
     def __init__(self, data_path, device="cpu"):
         self.data_path = data_path
@@ -42,6 +43,10 @@ class ImageTextPair(Dataset):
     
     def __getitem__(self, idx):
         return self.image[idx], self.text[idx]
+    
+# for CLIP finetune
+class ImageImagePair(Dataset):
+    pass
 
 
 def get_dataloader(batch_size: int, data_path: str, device='cpu'):
