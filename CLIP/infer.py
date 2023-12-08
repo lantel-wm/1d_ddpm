@@ -1,5 +1,5 @@
 import torch
-from .clip import CLIPModel
+from .clip import CLIP
 
 class CLIPInfer:
     def __init__(self, model_path:str, device=None) -> None:
@@ -8,7 +8,7 @@ class CLIPInfer:
         else:
             self.device = "cuda" if torch.cuda.is_available() else "cpu"
             
-        self.model = CLIPModel().to(self.device)
+        self.model = CLIP().to(self.device)
         self.model.load_state_dict(torch.load(model_path, map_location=self.device))
         self.model.eval()
         

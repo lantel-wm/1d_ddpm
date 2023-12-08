@@ -3,6 +3,7 @@ from torch import nn
 import torch.nn.functional as F
 
 from .resnet import ResNet, BasicBlock
+from .resnet_adabn import AdaBNResNet, AdaBNBlock
 
 
 class ProjectionHead(nn.Module):
@@ -29,7 +30,7 @@ class ProjectionHead(nn.Module):
         return x
 
 
-class CLIPModel(nn.Module):
+class CLIP(nn.Module):
     def __init__(
         self,
         temperature=1.0,
@@ -79,7 +80,7 @@ def cross_entropy(preds, targets, reduction='none'):
     
     
 if __name__ == '__main__':
-    model = CLIPModel()
+    model = CLIP()
     img = torch.randn(16, 1, 960)
     txt = torch.randn(16, 1, 240)
     # print(img, txt)

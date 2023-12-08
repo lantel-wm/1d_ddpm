@@ -4,14 +4,14 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from tqdm.auto import tqdm
-from .clip import CLIPModel
+from .clip import CLIP
 from .dataloader import get_dataloader
 
 class Trainer:
     def __init__(self, batch_size=64, epochs=100, device=None) -> None:
         self.batch_size = batch_size
         self.epochs = epochs
-        self.model = CLIPModel()
+        self.model = CLIP()
         
         if device is not None:
             self.device = device
