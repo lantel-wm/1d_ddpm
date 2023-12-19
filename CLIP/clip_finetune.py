@@ -43,7 +43,7 @@ class CLIPFinetune(nn.Module):
         temperature=1.0,
         image_embedding=512,
         text_embedding=512,
-        diffusion_steps=300,
+        diffusion_steps=1000,
         clip_model_path = None,
         device=None,
     ):

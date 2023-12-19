@@ -14,13 +14,14 @@ class AdaBNBlock(nn.Module):
         stride: int = 1,
         expansion: int = 1,
         downsample: nn.Module = None,
-        diffusion_steps: int = 300,
+        diffusion_steps: int = 1000,
     ) -> None:
         super(AdaBNBlock, self).__init__()
         # Multiplicative factor for the subsequent conv1d layer's output channels.
         # It is 1 for ResNet18 and ResNet34.
         self.expansion = expansion
         self.downsample = downsample
+        self.diffusion_steps = diffusion_steps
         self.conv1 = nn.Conv1d(
             in_channels,
             out_channels,
@@ -82,7 +83,7 @@ class AdaBNResNet(nn.Module):
         img_channels: int,
         num_layers: int,
         block: Type[AdaBNBlock],
-        diffusion_steps: int = 300,
+        diffusion_steps: int = 1000,
     ) -> None:
         super(AdaBNResNet, self).__init__()
         self.diffusion_steps = diffusion_steps

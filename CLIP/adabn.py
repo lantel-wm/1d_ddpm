@@ -4,7 +4,7 @@ import torch.nn as nn
 
 class AdaBN1d(nn.Module):
     def __init__(self, num_features: int, 
-        num_classes: int, 
+        num_classes: int = 1000, 
         epsilon=1e-5, 
         momentum=0.1, 
         # affine=True, 
@@ -35,7 +35,7 @@ class AdaBN1d(nn.Module):
     def forward(self, x, class_id: int):
         # [N, C, L]  or [N, C]
         assert len(x.shape) == 3 or len(x.shape) == 2, "Input tensor must be 3d or 2d"
-        assert class_id < self.num_classes, "Class id must be less than num_classes"
+        assert class_id < self.num_classes, f"Class id {class_id} must be less than num_classes {self.num_classes}"
         self.it_count += 1
         
         is_3d = (len(x.shape) == 3)
@@ -51,6 +51,7 @@ class AdaBN1d(nn.Module):
             reduction_dims = (0, 2) if len(x.shape) == 3 else 0 # dims to be reduced
             batch_mu = x.mean(dim=reduction_dims).unsqueeze(0) # [1, num_features]
             batch_sigma = x.std(dim=reduction_dims).unsqueeze(0) # [1, num_features]
+            
             if len(x.shape) == 3:
                 batch_mu = batch_mu.unsqueeze(-1)
                 batch_sigma = batch_sigma.unsqueeze(-1)

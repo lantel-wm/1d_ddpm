@@ -25,7 +25,7 @@ class Trainer:
         self.device = default(device, "cuda" if torch.cuda.is_available() else "cpu")
         # define diffusion model
         self.diffuser = diffuser
-        self.T = self.diffuser.timesteps
+        self.T = self.diffuser.time_steps
         self.forward_diffusion_sample = self.diffuser.forward
         self.model = self.diffuser.model
         self.sampler = sampler
@@ -33,7 +33,8 @@ class Trainer:
         if not os.path.exists(self.model_save_dir):
             os.makedirs(self.model_save_dir)
             
-        self.optimizer = torch.optim.Adam(self.model.parameters(), lr=1e-3)
+        self.optimizer = torch.optim.Adam(self.model.parameters(), lr=1e-4)
+        self.scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(self.optimizer, T_0=1125, T_mult=2, eta_min=1e-6)
         self.epochs = epochs
         self.dataloader = get_dataloader(batch_size, "./datasets", device=self.device)
     
@@ -62,13 +63,15 @@ class Trainer:
             for data in loop:
                 self.optimizer.zero_grad()
                 
+                # [0, T)
                 t = torch.randint(0, self.T, (self.batch_size,)).to(self.device).long()
                 data = data.to(self.device)
                 loss = self.get_loss(data, t)
                 loss.backward()
                 self.optimizer.step()
+                self.scheduler.step()
                 # losses.append(loss.item())
-                loop.set_postfix(loss=loss.item())
+                loop.set_postfix(loss=loss.item(), lr=self.scheduler.get_last_lr()[0])
                 
             self.save_model_weight(epoch)
             # self.save_sampled_image(epoch, torch.Size([1, 1, 960]))

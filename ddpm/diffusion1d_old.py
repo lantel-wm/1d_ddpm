@@ -10,29 +10,24 @@ from .unet2d import Unet2d
 
 class Diffusion1d(object):
     def __init__(self, time_steps: int, sample_steps: int, model, H=None, device=None, model_path=None) -> None:
+        self.time_steps = time_steps
+        self.sample_steps = sample_steps
+        # Define beta schedule
+        self.betas = self._linear_beta_schedule()
+
+        # Pre-calculate different terms for closed form
+        self.alphas = 1. - self.betas
+        self.alphas_cumprod = torch.cumprod(self.alphas, axis=0)
+        self.alphas_cumprod_prev = F.pad(self.alphas_cumprod[:-1], (1, 0), value=1.0)
+        self.sqrt_recip_alphas = torch.sqrt(1.0 / self.alphas)
+        self.sqrt_alphas_cumprod = torch.sqrt(self.alphas_cumprod)
+        self.sqrt_one_minus_alphas_cumprod = torch.sqrt(1. - self.alphas_cumprod)
+        self.posterior_variance = self.betas * (1. - self.alphas_cumprod_prev) / (1. - self.alphas_cumprod)
+        
         if device is not None:
             self.device = device
         else:
             self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-            
-        self.time_steps = time_steps # [1, ..., T]
-        self.sample_steps = sample_steps # sample_steps < time_steps
-        self.tau = torch.linspace(self.time_steps - 1, 0, (self.sample_steps + 1)).long().to(self.device)
-        print(self.tau)
-        # Define beta schedule
-        self.betas = self._linear_beta_schedule().to(self.device)
-
-        # Pre-calculate different terms for closed form
-        self.alphas = 1. - self.betas
-        self.alphas_bar = torch.cumprod(self.alphas, axis=0)
-        self.alphas_bar_prev = F.pad(self.alphas_bar[:-1], (1, 0), value=1.0)
-        self.sqrt_recip_alphas = torch.sqrt(1.0 / self.alphas)
-        self.sqrt_recip_alphas_prev = F.pad(self.sqrt_recip_alphas[:-1], (1, 0), value=1.0)
-        self.sqrt_alphas_bar = torch.sqrt(self.alphas_bar)
-        self.sqrt_alphas_bar_prev = F.pad(self.sqrt_alphas_bar[:-1], (1, 0), value=1.0)
-        self.sqrt_minus_alphas_bar = torch.sqrt(1. - self.alphas_bar)
-        self.sqrt_minus_alphas_bar_prev = F.pad(self.sqrt_minus_alphas_bar[:-1], (1, 0), value=1.0)
-        self.posterior_variance = self.betas * (1. - self.alphas_bar_prev) / (1. - self.alphas_bar)
             
         # Define model
         self.model = model.to(self.device)
@@ -54,7 +49,7 @@ class Diffusion1d(object):
             torch.Tensor: value at timestep t
         """
         batch_size = t.shape[0] # batch_size
-        out = vals.gather(-1, t) # (batch_size, 1)
+        out = vals.gather(-1, t.cpu()) # (batch_size, 1)
         return out.reshape(batch_size, *((1,) * (len(x_shape) - 1))).to(t.device)
     
     
@@ -82,10 +77,10 @@ class Diffusion1d(object):
         noise = torch.randn_like(x_0).to(self.device)
         
         sqrt_alphas_cumprod_t = self._get_index_from_list(
-            self.sqrt_alphas_bar, t, x_0.shape
+            self.sqrt_alphas_cumprod, t, x_0.shape
         )
         sqrt_one_minus_alphas_cumprod_t = self._get_index_from_list(
-            self.sqrt_minus_alphas_bar, t, x_0.shape
+            self.sqrt_one_minus_alphas_cumprod, t, x_0.shape
         )
         # mean + variance
         return sqrt_alphas_cumprod_t.to(self.device) * x_0.to(self.device) \
@@ -106,10 +101,10 @@ class Diffusion1d(object):
         noise = torch.matmul(noise, self.H.T)
         
         sqrt_alphas_cumprod_t = self._get_index_from_list(
-            self.sqrt_alphas_bar, t, y_o.shape
+            self.sqrt_alphas_cumprod, t, y_o.shape
         )
         sqrt_one_minus_alphas_cumprod_t = self._get_index_from_list(
-            self.sqrt_minus_alphas_bar, t, y_o.shape
+            self.sqrt_one_minus_alphas_cumprod, t, y_o.shape
         )
         # mean + variance
         return sqrt_alphas_cumprod_t.to(self.device) * y_o.to(self.device) \
@@ -126,7 +121,7 @@ class Diffusion1d(object):
         """
         betas_t = self._get_index_from_list(self.betas, t, x.shape)
         sqrt_one_minus_alphas_cumprod_t = self._get_index_from_list(
-            self.sqrt_minus_alphas_bar, t, x.shape
+            self.sqrt_one_minus_alphas_cumprod, t, x.shape
         )
         sqrt_recip_alphas_t = self._get_index_from_list(self.sqrt_recip_alphas, t, x.shape)
         
@@ -179,38 +174,29 @@ class Diffusion1d(object):
         # return x_ft
     
     @torch.no_grad()
-    def sample_timestep_guidance(self, x_f, y_o, s_f, s_o, x, itau):
-        t = torch.full((x.shape[0],), self.tau[itau].item(), dtype=torch.long, device=self.device)
-        sqrt_alphas_bar = self._get_index_from_list(self.sqrt_alphas_bar, t, x.shape)
-        sqrt_minus_alphas_bar = self._get_index_from_list(
-                self.sqrt_minus_alphas_bar, t, x.shape
-            )
-        alphas_bar = self._get_index_from_list(self.alphas_bar, t, x.shape)        
-
-        if itau != self.sample_steps:
-            t_prev = torch.full((x.shape[0],), self.tau[itau + 1].item(), dtype=torch.long, device=self.device)
-            sqrt_alphas_bar_prev = self._get_index_from_list(self.sqrt_alphas_bar, t_prev, x.shape)
-            alphas_bar_prev = self._get_index_from_list(self.alphas_bar, t_prev, x.shape)
+    def sample_timestep_guidance(self, x_f, y_o, s_f, s_o, x, t):
+        betas_cur = self._get_index_from_list(self.betas, t, x.shape)
+        sqrt_one_minus_alphas_cumprod_t = self._get_index_from_list(
+            self.sqrt_one_minus_alphas_cumprod, t, x.shape
+        )
+        posterior_variance = self._get_index_from_list(self.posterior_variance, t, x.shape)
+        sqrt_recip_alphas_cur = self._get_index_from_list(self.sqrt_recip_alphas, t, x.shape)
+        alphas_cumprod_cur = self._get_index_from_list(self.alphas_cumprod, t, x.shape)
+        alphas_cumprod_prev = self._get_index_from_list(self.alphas_cumprod_prev, t, x.shape)
         
         dFo = self.gradient_F_observation(x, y_o, t) * s_o
         dFf = self.gradient_F_forecast(x, x_f, t) * s_f
-        eps = self.model(x, t) - sqrt_minus_alphas_bar * (dFo + dFf)
+        eps = self.model(x, t)
 
-        if itau == self.sample_steps:
-            f_theta = (x - sqrt_minus_alphas_bar * eps) / sqrt_alphas_bar
-            return f_theta
-        
-        eta = 0.0
-        sigma_t = eta * ((1 - alphas_bar_prev) / (1 - alphas_bar)) ** 0.5 \
-            * ((1 - alphas_bar / alphas_bar_prev)) ** 0.5
-        
-        predicted_x0 = sqrt_alphas_bar_prev * (x - sqrt_minus_alphas_bar * eps) / sqrt_alphas_bar
-        dir2_xt = (1 - alphas_bar_prev - sigma_t ** 2) ** 0.5 * eps
+        sigma_t = 1.0 * ((1 - alphas_cumprod_prev) / (1 - alphas_cumprod_cur)) ** 0.5 \
+            * ((1 - alphas_cumprod_cur / alphas_cumprod_prev)) ** 0.5
+        # sigma_t = 0
+        predicted_x0 = alphas_cumprod_prev ** 0.5 * (x - sqrt_one_minus_alphas_cumprod_t * eps) / (alphas_cumprod_cur ** 0.5)
+        dir2_xt = (1 - alphas_cumprod_prev - sigma_t ** 2) ** 0.5 * eps
         
         noise = torch.randn_like(x) if t > 0 else 0
         
-        # return predicted_x0 + dir2_xt + posterior_variance * (dFo + dFf) + sigma_t * noise
-        return predicted_x0 + dir2_xt + sigma_t * noise
+        return predicted_x0 + dir2_xt + posterior_variance * (dFo + dFf) + sigma_t * noise
     
     @torch.no_grad()
     def sampling_guided(self, x_T: torch.Tensor, x_f, y_o, s_f, s_o) -> torch.Tensor:
@@ -223,13 +209,13 @@ class Diffusion1d(object):
         """
         x = x_T
         eta = 1
-        # ts = torch.linspace(self.time_steps, 0, (self.sample_steps + 1)).to(self.device).to(torch.long)
+        ts = torch.linspace(self.time_steps, 0, (self.sample_steps + 1)).to(self.device).to(torch.long)
         # for i in tqdm(reversed(range(self.time_steps)), desc="Sampling"):
         #     t = torch.full((x.shape[0],), i, dtype=torch.long, device=self.device)
         #     x = self.sample_timestep_guidance(x_f, y_o, s_f, s_o, x, t)
         for i in tqdm(range(1, self.sample_steps + 1), desc='DDIM Sampling'):
-            itau = torch.full((x.shape[0],), i, dtype=torch.long, device=self.device)
-            x = self.sample_timestep_guidance(x_f, y_o, s_f, s_o, x, itau)
+            t = torch.full((x.shape[0],), ts[i], dtype=torch.long, device=self.device)
+            x = self.sample_timestep_guidance(x_f, y_o, s_f, s_o, x, t)
         return x
     
     # DDIM

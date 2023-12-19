@@ -1,1 +1,1 @@
-Denoising Diffusion Probabilistic Models for 1d sequence.
+# Denoising Diffusion Models for 1D Data
