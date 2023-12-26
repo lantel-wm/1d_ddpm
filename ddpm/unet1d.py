@@ -1,3 +1,4 @@
+# conditional 1d unet model
 import math
 from pathlib import Path
 from functools import partial
@@ -101,7 +102,7 @@ class PreNorm(nn.Module):
         self.fn = fn
         self.norm = RMSNorm(dim)
 
-    def forward(self, x):
+    def forward(self, x, *args, **kwargs):
         x = self.norm(x)
         return self.fn(x)
 
@@ -237,6 +238,35 @@ class Attention(nn.Module):
 
         out = rearrange(out, 'b h n d -> b (h d) n')
         return self.to_out(out)
+    
+    
+class CrossAttention(nn.Module):
+    def __init__(self, dim, heads = 4, dim_head = 32):
+        super().__init__()
+        self.scale = dim_head ** -0.5
+        self.heads = heads
+        hidden_dim = dim_head * heads
+        context_dim = 512
+
+        self.to_q = nn.Conv1d(dim, hidden_dim, 1, bias = False)
+        self.to_kv = nn.Conv1d(context_dim, hidden_dim * 2, 1, bias = False)
+        self.to_qkv = nn.Conv1d(dim, hidden_dim * 3, 1, bias = False)
+        self.to_out = nn.Conv1d(hidden_dim, dim, 1)
+
+    def forward(self, x, context=None):
+        b, c, n = x.shape
+        if context is None:
+            q, k, v = self.to_qkv(x).chunk(3, dim = 1)
+        else:
+            q, k, v = self.to_q(x), *self.to_kv(context).chunk(2, dim = 1)
+        q, k, v = map(lambda t: rearrange(t, 'b (h c) n -> b h c n', h = self.heads), (q, k, v))
+
+        sim = einsum('b h d i, b h d j -> b h i j', q, k)
+        attn = sim.softmax(dim = -1)
+        out = einsum('b h i j, b h d j -> b h i d', attn, v)
+
+        out = rearrange(out, 'b h n d -> b (h d) n')
+        return self.to_out(out)
 
 # model
 
@@ -305,23 +335,27 @@ class Unet1d(nn.Module):
 
             self.downs.append(nn.ModuleList([
                 block_klass(dim_in, dim_in, time_emb_dim = time_dim),
+                Residual(PreNorm(dim_in, CrossAttention(dim_in, dim_head = attn_dim_head, heads = attn_heads))),
                 block_klass(dim_in, dim_in, time_emb_dim = time_dim),
-                Residual(PreNorm(dim_in, LinearAttention(dim_in))),
+                Residual(PreNorm(dim_in, CrossAttention(dim_in, dim_head = attn_dim_head, heads = attn_heads))),
+                # Residual(PreNorm(dim_in, LinearAttention(dim_in))),
                 Downsample(dim_in, dim_out) if not is_last else nn.Conv1d(dim_in, dim_out, 3, padding = 1)
             ]))
 
         mid_dim = dims[-1]
         self.mid_block1 = block_klass(mid_dim, mid_dim, time_emb_dim = time_dim)
-        self.mid_attn = Residual(PreNorm(mid_dim, Attention(mid_dim, dim_head = attn_dim_head, heads = attn_heads)))
+        self.mid_attn = Residual(PreNorm(mid_dim, CrossAttention(mid_dim, dim_head = attn_dim_head, heads = attn_heads)))
         self.mid_block2 = block_klass(mid_dim, mid_dim, time_emb_dim = time_dim)
 
         for ind, (dim_in, dim_out) in enumerate(reversed(in_out)):
             is_last = ind == (len(in_out) - 1)
-
+            
             self.ups.append(nn.ModuleList([
                 block_klass(dim_out + dim_in, dim_out, time_emb_dim = time_dim),
+                Residual(PreNorm(dim_out, CrossAttention(dim_out, dim_head = attn_dim_head, heads = attn_heads))),
                 block_klass(dim_out + dim_in, dim_out, time_emb_dim = time_dim),
-                Residual(PreNorm(dim_out, LinearAttention(dim_out))),
+                Residual(PreNorm(dim_out, CrossAttention(dim_out, dim_head = attn_dim_head, heads = attn_heads))),
+                # Residual(PreNorm(dim_out, LinearAttention(dim_out))),
                 Upsample(dim_out, dim_in) if not is_last else  nn.Conv1d(dim_out, dim_in, 3, padding = 1)
             ]))
 
@@ -331,7 +365,7 @@ class Unet1d(nn.Module):
         self.final_res_block = block_klass(dim * 2, dim, time_emb_dim = time_dim)
         self.final_conv = nn.Conv1d(dim, self.out_dim, 1)
 
-    def forward(self, x, time, x_self_cond = None):
+    def forward(self, x, time, text_embed = None, x_self_cond = None):
         if self.self_condition:
             x_self_cond = default(x_self_cond, lambda: torch.zeros_like(x))
             x = torch.cat((x_self_cond, x), dim = 1)
@@ -343,27 +377,29 @@ class Unet1d(nn.Module):
 
         h = []
 
-        for block1, block2, attn, downsample in self.downs:
+        for block1, attn1, block2, attn2, downsample in self.downs:
             x = block1(x, t)
+            x = attn1(x, text_embed)
             h.append(x)
 
             x = block2(x, t)
-            x = attn(x)
+            x = attn2(x, text_embed)
             h.append(x)
 
             x = downsample(x)
 
         x = self.mid_block1(x, t)
-        x = self.mid_attn(x)
+        x = self.mid_attn(x, text_embed)
         x = self.mid_block2(x, t)
 
-        for block1, block2, attn, upsample in self.ups:
+        for block1, attn1, block2, attn2, upsample in self.ups:
             x = torch.cat((x, h.pop()), dim = 1)
             x = block1(x, t)
+            x = attn1(x, text_embed)
 
             x = torch.cat((x, h.pop()), dim = 1)
             x = block2(x, t)
-            x = attn(x)
+            x = attn2(x, text_embed)
 
             x = upsample(x)
 
@@ -378,4 +414,3 @@ if __name__ == '__main__':
     x = torch.randn(1, 1, 960)
     y = model(x, torch.Tensor([0]))
     print(y.shape)
-    

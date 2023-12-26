@@ -7,7 +7,7 @@ from functools import partial
 
 if __name__ == "__main__":
     # model = Unet(dim=64, dim_mults=(1, 2, 4, 8), flash_attn=True)'
-    batch_size = 256
+    batch_size = 64
     model = Unet1d(dim=64, dim_mults=(1, 2, 4, 8), channels=1)
     # model = SimpleUnet()
     diffuser = Diffusion1d(time_steps=1000, sample_steps=1000, model=model, device='cuda')

@@ -18,7 +18,7 @@ class Diffusion1d(object):
         self.time_steps = time_steps # [1, ..., T]
         self.sample_steps = sample_steps # sample_steps < time_steps
         self.tau = torch.linspace(self.time_steps - 1, 0, (self.sample_steps + 1)).long().to(self.device)
-        print(self.tau)
+        # print(self.tau)
         # Define beta schedule
         self.betas = self._linear_beta_schedule().to(self.device)
 
@@ -70,7 +70,7 @@ class Diffusion1d(object):
         return torch.linspace(start, end, self.time_steps)
     
     
-    def forward(self, x_0: torch.Tensor, t: torch.Tensor, type='forecast') -> tuple[torch.Tensor, torch.Tensor]:
+    def forward(self, x_0: torch.Tensor, t: torch.Tensor, type='forecast'):
         """ forward process of diffusion model
         Args:
             x_0 (torch.Tensor): input image

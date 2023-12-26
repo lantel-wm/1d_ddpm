@@ -14,6 +14,7 @@ class Finetuner:
             epochs=100, 
             device=None, 
             clip_model_path='weights/pretrained_clip.pt',
+            finetune_model_path=None,
             diffuser=None,
         ) -> None:
         self.batch_size = batch_size
@@ -21,6 +22,8 @@ class Finetuner:
         self.model = CLIPFinetune(clip_model_path=clip_model_path, device=device, diffusion_steps=1000)
         self.diffuser = diffuser
         
+        if finetune_model_path is not None:
+            self.model.load_state_dict(torch.load(finetune_model_path))
         
         if device is not None:
             self.device = device

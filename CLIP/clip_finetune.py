@@ -4,7 +4,8 @@ import torch.nn.functional as F
 import json
 
 # from .resnet import ResNet, BasicBlock
-from .resnet_adabn import AdaBNResNet, AdaBNBlock
+# from .resnet_adabn import AdaBNResNet, AdaBNBlock
+from .resnet_time_embd import ResNetTE, TEBlock
 from .clip import CLIP
 
 
@@ -58,9 +59,9 @@ class CLIPFinetune(nn.Module):
         self.clip_model.eval()
         
         self.image_encoder = self.clip_model.image_encoder
-        self.noisy_image_encoder = AdaBNResNet(img_channels=1,
+        self.noisy_image_encoder = ResNetTE(img_channels=1,
             num_layers=18, 
-            block=AdaBNBlock,
+            block=TEBlock,
             diffusion_steps=diffusion_steps,
         ).to(self.device)
         self.image_projection = self.clip_model.image_projection

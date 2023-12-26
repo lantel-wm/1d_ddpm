@@ -9,6 +9,7 @@ import matplotlib.pyplot as plt
 from .dataloader import get_dataloader
 # from .diffusion1d import Diffusion1d
 from .utils import default
+from CLIP.clip import CLIP
 
 
 class Trainer:
@@ -37,10 +38,13 @@ class Trainer:
         self.scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(self.optimizer, T_0=1125, T_mult=2, eta_min=1e-6)
         self.epochs = epochs
         self.dataloader = get_dataloader(batch_size, "./datasets", device=self.device)
+        
+        self.clip_model = CLIP().to(self.device)
+        self.clip_model.load_state_dict(torch.load("./weights/pretrained_clip.pt"))
     
-    def get_loss(self, x_0, t):
+    def get_loss(self, x_0, t, text):
         x_noisy, noise = self.forward_diffusion_sample(x_0, t)
-        noise_pred = self.model(x_noisy, t)
+        noise_pred = self.model(x_noisy, t, text_embed=text)
         return F.l1_loss(noise, noise_pred)
     
     def save_model_weight(self, epoch):
@@ -60,18 +64,26 @@ class Trainer:
         for epoch in range(self.epochs):
             loop = tqdm(self.dataloader, desc=f"Epoch {epoch}")
             # losses = []
-            for data in loop:
+            for data, obs in loop:
                 self.optimizer.zero_grad()
                 
                 # [0, T)
                 t = torch.randint(0, self.T, (self.batch_size,)).to(self.device).long()
+                text = self.clip_model.text_encoder(obs)
+                text = self.clip_model.text_projection(text)
+                # print(text.shape)
+                
+                # randomly set the text to None
+                if torch.rand(1) < 0.25:
+                    text = None
+                
                 data = data.to(self.device)
-                loss = self.get_loss(data, t)
+                loss = self.get_loss(data, t, text)
                 loss.backward()
                 self.optimizer.step()
                 self.scheduler.step()
                 # losses.append(loss.item())
-                loop.set_postfix(loss=loss.item(), lr=self.scheduler.get_last_lr()[0])
+                loop.set_postfix(loss=loss.item(), lr=self.scheduler.get_last_lr()[0], t=t[0].item(), text=(text is not None))
                 
             self.save_model_weight(epoch)
             # self.save_sampled_image(epoch, torch.Size([1, 1, 960]))
