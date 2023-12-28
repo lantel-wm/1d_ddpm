@@ -277,7 +277,7 @@ class Unet1d(nn.Module):
         init_dim = None,
         out_dim = None,
         dim_mults=(1, 2, 4, 8),
-        channels = 3,
+        channels = 1,
         self_condition = False,
         resnet_block_groups = 8,
         learned_variance = False,
@@ -411,6 +411,6 @@ class Unet1d(nn.Module):
     
 if __name__ == '__main__':
     model = Unet1d(64)
-    x = torch.randn(1, 1, 960)
+    x = torch.randn(1, 1, 64)
     y = model(x, torch.Tensor([0]))
     print(y.shape)

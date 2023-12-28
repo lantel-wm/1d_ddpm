@@ -148,6 +148,7 @@ class ResNet(nn.Module):
         # x = self.fc(x)
         return x
     
+
     
 if __name__ == '__main__':
     tensor = torch.rand([1, 1, 960])

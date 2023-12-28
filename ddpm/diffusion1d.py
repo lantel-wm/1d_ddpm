@@ -6,10 +6,11 @@ from tqdm.auto import tqdm
 
 from .unet1d import Unet1d
 from .unet2d import Unet2d
+from CLIP.clip import CLIP
 
 
-class Diffusion1d(object):
-    def __init__(self, time_steps: int, sample_steps: int, model, H=None, device=None, model_path=None) -> None:
+class StableDiffusion1d(object):
+    def __init__(self, time_steps: int, sample_steps: int, unet, vae, H=None, device=None, unet_path=None) -> None:
         if device is not None:
             self.device = device
         else:
@@ -35,9 +36,13 @@ class Diffusion1d(object):
         self.posterior_variance = self.betas * (1. - self.alphas_bar_prev) / (1. - self.alphas_bar)
             
         # Define model
-        self.model = model.to(self.device)
-        if model_path is not None:
-            self.model.load_state_dict(torch.load(model_path))
+        self.unet = unet.to(self.device)
+        if vae is not None:
+            self.vae = vae.to(self.device)
+        self.clip_model = CLIP().to(self.device)
+        self.clip_model.load_state_dict(torch.load("./weights/pretrained_clip.pt"))
+        if unet_path is not None:
+            self.unet.load_state_dict(torch.load(unet_path))
         if H is not None:
             self.H = H.to(self.device) # forward operator, 240 x 960
     
@@ -118,7 +123,7 @@ class Diffusion1d(object):
             
             
     @torch.no_grad()
-    def sample_timestep(self, x: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
+    def sample_timestep(self, x: torch.Tensor, t: torch.Tensor, obs=None) -> torch.Tensor:
         """
         Calls the model to predict the noise in the image and returns 
         the denoised image. 
@@ -130,9 +135,14 @@ class Diffusion1d(object):
         )
         sqrt_recip_alphas_t = self._get_index_from_list(self.sqrt_recip_alphas, t, x.shape)
         
+        text_e = None
+        if obs is not None:
+            text_f = self.clip_model.text_encoder(obs)
+            text_e = self.clip_model.text_projection(text_f)
+        
         # Call model (current image - noise prediction)
         model_mean = sqrt_recip_alphas_t * (
-            x - betas_t * self.model(x, t) / sqrt_one_minus_alphas_cumprod_t
+            x - betas_t * self.unet(x, t, text_e) / sqrt_one_minus_alphas_cumprod_t
         )
         posterior_variance_t = self._get_index_from_list(self.posterior_variance, t, x.shape)
         
@@ -145,7 +155,7 @@ class Diffusion1d(object):
             return model_mean + torch.sqrt(posterior_variance_t) * noise
         
     @torch.no_grad()
-    def sampling(self, x_T: torch.Tensor) -> torch.Tensor:
+    def sampling(self, x_T: torch.Tensor, obs=None) -> torch.Tensor:
         """ sampling process of diffusion model
         Args:
             x_T (torch.Tensor): input image (gaussian noise)
@@ -156,15 +166,15 @@ class Diffusion1d(object):
         x = x_T
         for i in tqdm(reversed(range(self.time_steps)), desc="Sampling"):
             t = torch.full((x.shape[0],), i, dtype=torch.long, device=self.device)
-            x = self.sample_timestep(x, t)
+            x = self.sample_timestep(x, t, obs)
         return x
     
     @torch.no_grad()
-    def sampling_sequence(self, x_shape: torch.Size) -> np.ndarray:
+    def sampling_sequence(self, x_shape: torch.Size, obs=None) -> np.ndarray:
         x_T = torch.randn(x_shape).to(self.device)
-        sampled_tensor = self.sampling(x_T)
-        sampled_seq = sampled_tensor.squeeze().detach().cpu().numpy()
-        return sampled_seq
+        sampled_tensor = self.sampling(x_T, obs)
+        # sampled_seq = sampled_tensor.squeeze().detach().cpu().numpy()
+        return sampled_tensor
     
     @torch.no_grad()
     def gradient_F_observation(self, x, y_o, t):
@@ -177,6 +187,40 @@ class Diffusion1d(object):
         x_ft, _ = self.forward(x_f, t)
         return -2 * (x - x_ft) / x.shape[-1]
         # return x_ft
+    
+    # @torch.no_grad()
+    # def sample_timestep_guidance(self, x_f, y_o, s_f, s_o, x, itau):
+    #     t = torch.full((x.shape[0],), self.tau[itau].item(), dtype=torch.long, device=self.device)
+    #     sqrt_alphas_bar = self._get_index_from_list(self.sqrt_alphas_bar, t, x.shape)
+    #     sqrt_minus_alphas_bar = self._get_index_from_list(
+    #             self.sqrt_minus_alphas_bar, t, x.shape
+    #         )
+    #     alphas_bar = self._get_index_from_list(self.alphas_bar, t, x.shape)        
+
+    #     if itau != self.sample_steps:
+    #         t_prev = torch.full((x.shape[0],), self.tau[itau + 1].item(), dtype=torch.long, device=self.device)
+    #         sqrt_alphas_bar_prev = self._get_index_from_list(self.sqrt_alphas_bar, t_prev, x.shape)
+    #         alphas_bar_prev = self._get_index_from_list(self.alphas_bar, t_prev, x.shape)
+        
+    #     dFo = self.gradient_F_observation(x, y_o, t) * s_o
+    #     dFf = self.gradient_F_forecast(x, x_f, t) * s_f
+    #     eps = self.unet(x, t) - sqrt_minus_alphas_bar * (dFo + dFf)
+
+    #     if itau == self.sample_steps:
+    #         f_theta = (x - sqrt_minus_alphas_bar * eps) / sqrt_alphas_bar
+    #         return f_theta
+        
+    #     eta = 0.0
+    #     sigma_t = eta * ((1 - alphas_bar_prev) / (1 - alphas_bar)) ** 0.5 \
+    #         * ((1 - alphas_bar / alphas_bar_prev)) ** 0.5
+        
+    #     predicted_x0 = sqrt_alphas_bar_prev * (x - sqrt_minus_alphas_bar * eps) / sqrt_alphas_bar
+    #     dir2_xt = (1 - alphas_bar_prev - sigma_t ** 2) ** 0.5 * eps
+        
+    #     noise = torch.randn_like(x) if t > 0 else 0
+        
+    #     # return predicted_x0 + dir2_xt + posterior_variance * (dFo + dFf) + sigma_t * noise
+    #     return predicted_x0 + dir2_xt + sigma_t * noise
     
     @torch.no_grad()
     def sample_timestep_guidance(self, x_f, y_o, s_f, s_o, x, itau):
@@ -192,9 +236,13 @@ class Diffusion1d(object):
             sqrt_alphas_bar_prev = self._get_index_from_list(self.sqrt_alphas_bar, t_prev, x.shape)
             alphas_bar_prev = self._get_index_from_list(self.alphas_bar, t_prev, x.shape)
         
-        dFo = self.gradient_F_observation(x, y_o, t) * s_o
-        dFf = self.gradient_F_forecast(x, x_f, t) * s_f
-        eps = self.model(x, t) - sqrt_minus_alphas_bar * (dFo + dFf)
+        text_f = self.clip_model.text_encoder(y_o)
+        text_e = self.clip_model.text_projection(text_f)
+        
+        eps_uncond = self.unet(x, t)
+        eps_cond = self.unet(x, t, text_embed=text_e)
+        eps = eps_uncond + s_o * (eps_cond - eps_uncond)
+        
 
         if itau == self.sample_steps:
             f_theta = (x - sqrt_minus_alphas_bar * eps) / sqrt_alphas_bar
@@ -235,6 +283,7 @@ class Diffusion1d(object):
     # DDIM
     @torch.no_grad()
     def sampling_guided_sequence(self, x_shape, x_f, y_o, s_f, s_o) -> np.ndarray:
+        torch.manual_seed(2333)
         x_T = torch.randn(x_shape).to(self.device)
         sampled_tensor = self.sampling_guided(x_T, x_f, y_o, s_f, s_o)
         sampled_seq = sampled_tensor.squeeze().detach().cpu().numpy()

@@ -1,5 +1,5 @@
 from ddpm import Trainer
-from ddpm import Diffusion1d
+from ddpm import StableDiffusion1d
 from ddpm import Unet1d, Unet2d
 from ddpm.dataloader import get_dataloader
 
@@ -18,8 +18,8 @@ if __name__ == "__main__":
         
     model = Unet1d(dim=64, dim_mults=(1, 2, 4, 8), channels=1)
     # model = SimpleUnet()
-    diffuser = Diffusion1d(time_steps=1000, sample_steps=10, model=model, device='cuda', model_path='weights/uncond_ddpm_1000.pt', H=H)
-    
+    # diffuser = StableDiffusion1d(time_steps=1000, sample_steps=10, unet=model, device='cuda', unet_path='weights/uncond_ddpm_1000.pt', H=H)
+    diffuser = StableDiffusion1d(time_steps=1000, sample_steps=10, unet=model, device='cuda', unet_path='results/model_19.pt', H=H, vae=None)    
     data_path = '/mnt/ssd/L05_experiments_datasets/EnKF_F16_inf_1.08_loc_GC_before_DA_sz40_5y_2/data'
     analy = np.load(data_path + '/analy.npy')
     obs = np.load(data_path + '/zobs.npy')
@@ -40,7 +40,7 @@ if __name__ == "__main__":
     
     
     
-    x_guided_sample = diffuser.sampling_guided_sequence(x_f.shape, x_f, y_o, s_f=0, s_o=20)
+    x_guided_sample = diffuser.sampling_guided_sequence(x_f.shape, x_f, y_o, s_f=0, s_o=1000)
     # x_sample = diffuser.sampling_sequence(x_f.shape)
     
     with open('datasets/image_min_max.txt', 'r') as f:
